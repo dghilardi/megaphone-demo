@@ -1,0 +1,35 @@
+version: '3.4'
+
+services:
+  megaphone:
+    image: dghila/megaphone:0.9.2
+    deploy:
+      replicas: 1
+    init: true
+    healthcheck:
+      test: "echo"
+      interval: 1s
+    environment:
+      - RUST_LOG=debug
+      - megaphone_agent=dockerized
+    ports:
+     - "3000:3000"
+  
+  chat:
+    build:
+      context: ..
+      dockerfile: docker/megaphone-chat-be.dockerfile
+    image: megaphone-chat:latest
+    ports:
+      - "3040:3040"
+    environment:
+      - MEGAPHONE_URL=http://megaphone:3000
+      - MEGAPHONE_AGENT_URL=http://megaphone:3000
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/megaphone-chat-fe.dockerfile
+    image: megaphone-chat-fe:latest
+    ports:
+      - "3080:80"
