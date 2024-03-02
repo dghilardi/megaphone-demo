@@ -3,8 +3,13 @@
 import { Application, Router } from 'https://deno.land/x/oak@v12.6.1/mod.ts';
 
 interface ChannelParams {
-  channelId: string,
   agentName: string,
+  producerAddress: string,
+}
+
+interface ChanCreateRes {
+  consumerAddress: string, 
+  producerAddress: string,
 }
 
 interface WriteBatchResDto {
@@ -26,9 +31,9 @@ const rooms: Record<string, ChannelParams[]> = {};
 
 const router = new Router();
 
-async function createChannel(): Promise<string> {
+async function createChannel(): Promise<{ consumerAddress: string, producerAddress: string }> {
   const url = `${megaphoneUrl}/create`;
-  const { channelId }: ChannelParams = await fetch(url, { method: 'POST' })
+  const { consumerAddress, producerAddress }: ChanCreateRes = await fetch(url, { method: 'POST' })
     .then((resp) => {
       if (!resp.ok) {
         throw new Error(`[${url}] HTTP status code: ${resp.status}`);
@@ -36,22 +41,22 @@ async function createChannel(): Promise<string> {
       return resp.json();
     });
 
-  return channelId;
+  return { consumerAddress, producerAddress };
 }
 
 router.post('/room/:room', async (ctx) => {
-  const channelId = ctx.request.headers.get('use-channel') || await createChannel();
-  const agentName = channelId.split('.')[0];
+  const { consumerAddress, producerAddress } = ctx.request.headers.get('use-channel') || await createChannel();
+  const agentName = consumerAddress.split('.')[0];
 
   const subscriptions = rooms[ctx.params.room];
   if (subscriptions) {
-    rooms[ctx.params.room] = [...subscriptions, { channelId, agentName }];
+    rooms[ctx.params.room] = [...subscriptions, { producerAddress, agentName }];
   } else {
-    rooms[ctx.params.room] = [{ channelId, agentName }];
+    rooms[ctx.params.room] = [{ producerAddress, agentName }];
   }
 
   ctx.response.body = JSON.stringify({
-    channelUuid: channelId,
+    channelUuid: consumerAddress,
     agentName
   });
 });
@@ -80,7 +85,7 @@ router.post('/send/:room', async (ctx) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        channelIds: channels.map(channelParams => channelParams.channelId),
+        channelIds: channels.map(channelParams => channelParams.producerAddress),
         messages: [{
           streamId: 'new-message',
           body: {
@@ -94,7 +99,7 @@ router.post('/send/:room', async (ctx) => {
     }).then(res => {
       if (res.status == 404) {
         console.warn(`subscription ${agentName} not found`);
-        unavailableChannels.push(...channels.map(par => par.channelId))
+        unavailableChannels.push(...channels.map(par => par.producerAddress))
       }
       return res.json()
     }).then((res: WriteBatchResDto) => {
@@ -105,7 +110,7 @@ router.post('/send/:room', async (ctx) => {
   await Promise.all(promises);
   for (const room of Object.keys(rooms)) {
     rooms[room] = rooms[room]
-      .filter(c => !unavailableChannels.includes(c.channelId));
+      .filter(c => !unavailableChannels.includes(c.producerAddress));
   }
 
   ctx.response.body = JSON.stringify({ status: 'ok' });

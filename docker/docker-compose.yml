@@ -2,7 +2,7 @@ version: '3.4'
 
 services:
   megaphone:
-    image: dghila/megaphone:0.9.2
+    image: dghila/megaphone:0.10.1
     deploy:
       replicas: 1
     init: true
@@ -12,6 +12,7 @@ services:
     environment:
       - RUST_LOG=debug
       - megaphone_agent=dockerized
+      - megaphone_agent_warmup_secs=0
     ports:
      - "3000:3000"
   
