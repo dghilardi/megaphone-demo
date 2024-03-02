@@ -1,9 +1,9 @@
 #! /usr/bin/env -S deno run --allow-net
 
-import { MegaphonePoller } from 'npm:megaphone-client@0.9.3';
-import { firstValueFrom } from "npm:rxjs@7.6.0";
+import { MegaphonePoller } from 'npm:megaphone-client@0.10.2';
+import { firstValueFrom } from "npm:rxjs@7.8.1";
 
-const poller = new MegaphonePoller('http://localhost:3000');
+const poller = new MegaphonePoller('http://localhost:3000', 100);
 const o = await poller.newUnboundedStream<{ message: string, sender: string }>(async channel => {
     let res = await fetch("http://localhost:3040/room/test", {
         method: "POST",
@@ -13,7 +13,7 @@ const o = await poller.newUnboundedStream<{ message: string, sender: string }>(a
     }).then(res => res.json());
 
     return {
-        channelId: res.channelUuid,
+        channelAddress: { consumer: res.channelUuid, producer: '' },
         streamIds: ['new-message'],
     }
 });
