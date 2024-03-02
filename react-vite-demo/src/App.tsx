@@ -3,6 +3,7 @@ import { Observable, Subscriber, Subscription } from 'rxjs';
 import reactLogo from './assets/react.svg'
 import { Message } from './components/Message';
 import moment from 'moment';
+import { MegaphonePoller } from 'megaphone-client';
 
 interface Message {
   text: string,
@@ -19,40 +20,6 @@ interface ReaderCtx {
   terminate: boolean,
 }
 
-const spawnReader = async (agentName: string, channelId: string, ctx: ReaderCtx) => {
-  while (!ctx.terminate) {
-    await fetch(`/read/${channelId}`, { headers: { 'megaphone-agent': agentName } })
-      .then(async (resp) => {
-        if (!resp.ok) {
-          throw new Error("HTTP status code: " + resp.status);
-        }
-        const reader = resp.body!
-          .pipeThrough(new TextDecoderStream())
-          .getReader();
-        
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          value
-            .trim()
-            .split('\n')
-            .forEach(chunk => {
-              const msg = JSON.parse(chunk);
-              ctx.subscriber.next({ text: msg.body?.message as string || '-', sent: msg.body?.sender === channelId, ts: moment(msg.timestamp).format('LT') })
-            });
-        }
-      });
-  }
-};
-
-const readerObservable = (agentName: string, channelId: string): Observable<Message> => {
-  return new Observable((subscriber) => {
-    const ctx = { terminate: false, subscriber };
-    spawnReader(agentName, channelId, ctx);
-    return () => { ctx.terminate = true; };
-  });
-};
-
 interface SubscriptionCtx {
   messages: Message[],
   messageRecipient: React.Dispatch<React.SetStateAction<Message[]>>,
@@ -60,7 +27,6 @@ interface SubscriptionCtx {
 
 function ChatApp({ room }: ChatAppParams) {
   const [subscriptionId, setSubscriptionId] = useState<string>();
-  const [agentName, setAgentName] = useState<string>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [subscriptionCtx, setSubscriptionCtx] = useState<SubscriptionCtx>({ messages, messageRecipient: setMessages });
   const [message, setMessage] = useState<string>('');
@@ -71,22 +37,25 @@ function ChatApp({ room }: ChatAppParams) {
   }, [messages, setMessages]);
 
   useEffect(() => {
-    console.log(`creating room ${room}`);
-    fetch(`/room/${room}`, { method: 'POST' })
-      .then(res => res.json())
-      .then(res => {
-        setSubscriptionId(res.channelUuid);
-        setAgentName(res.agentName);
-      })
-  }, [room]);
+    const poller = new MegaphonePoller('', 100);
+    let channelId: undefined | string;
+    poller.newUnboundedStream<{ message: string, sender: string, timestamp: string }>(async channel => {
+        let res = await fetch(`/room/${room}`, {
+            method: "POST",
+            headers: {
+                ...(channel ? { 'use-channel': channel } : {}),
+            },
+        }).then(res => res.json());
 
-  useEffect(() => {
-    if (subscriptionId && agentName) {
-      const subscription = readerObservable(agentName, subscriptionId)
-        .subscribe(msg => subscriptionCtx.messageRecipient([...subscriptionCtx.messages, msg]));
-      return () => subscription.unsubscribe();
-    }
-  }, [subscriptionId, agentName, subscriptionCtx])
+        setSubscriptionId(res.channelUuid);
+        channelId = res.channelUuid;
+  
+        return {
+            channelAddress: { consumer: res.channelUuid, producer: '' },
+            streamIds: ['new-message'],
+        }
+    }).then(o => o.subscribe(msg => subscriptionCtx.messageRecipient([...subscriptionCtx.messages, { text: msg.body?.message as string || '-', sent: msg.body?.sender === channelId, ts: moment(msg.ts).format('LT') }])));
+  }, [room, subscriptionCtx]);
 
   if (!subscriptionId) {
     return <p>Loading...</p>;
